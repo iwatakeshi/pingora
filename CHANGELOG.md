@@ -17,6 +17,10 @@ All notable changes to this project will be documented in this file.
   - Example implementation in `connection_tracking_server.rs`
   - Documentation in `docs/user_guide/hot_restart.md`
 
+### 🔧 Maintenance
+
+- Updated `httparse` constraint from `=1.8.0` to `^1.8` for AWS SDK compatibility (allows httparse >= 1.8)
+
 ## [0.6.0](https://github.com/cloudflare/pingora/compare/0.5.0...0.6.0) - 2025-08-15
  
 ### Highlights
