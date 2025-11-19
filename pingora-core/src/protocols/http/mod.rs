@@ -26,6 +26,7 @@ pub mod server;
 pub mod subrequest;
 pub mod v1;
 pub mod v2;
+pub mod websocket;
 
 pub use server::Session as ServerSession;
 

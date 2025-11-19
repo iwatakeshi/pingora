@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### 🚀 Features
+
+- **Hot Restart Enhancements**: Added comprehensive connection tracking system for intelligent graceful shutdown
+  - New `ConnectionCounter` module with lock-free atomic counters for HTTP, WebSocket, gRPC, and SSE connections
+  - RAII-based `ConnectionGuard` for automatic cleanup with panic safety
+  - Enhanced graceful shutdown with adaptive polling (500ms for long-lived connections, 100ms for short-lived)
+  - WebSocket detection utilities compliant with RFC 6455
+  - Connection type classification for intelligent drain strategies
+  - Progress reporting during shutdown with 5-second intervals
+  - Comprehensive concurrency tests validating thread-safe operation
+  - Example implementation in `connection_tracking_server.rs`
+  - Documentation in `docs/user_guide/hot_restart.md`
+
 ## [0.6.0](https://github.com/cloudflare/pingora/compare/0.5.0...0.6.0) - 2025-08-15
  
 ### Highlights

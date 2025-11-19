@@ -75,6 +75,11 @@ pub struct ServerConf {
     #[cfg(feature = "s2n")]
     pub s2n_config_cache_size: Option<usize>,
     /// Grace period in seconds before starting the final step of the graceful shutdown after signaling shutdown.
+    ///
+    /// # Security Note
+    /// To prevent DoS attacks from connections that never close, always configure this
+    /// to a reasonable value. After this timeout, the server will forcefully terminate
+    /// remaining connections.
     pub grace_period_seconds: Option<u64>,
     /// Timeout in seconds of the final step for the graceful shutdown.
     pub graceful_shutdown_timeout_seconds: Option<u64>,

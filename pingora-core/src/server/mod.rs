@@ -15,6 +15,7 @@
 //! Server process and configuration management
 
 pub mod configuration;
+pub mod connection_counter;
 #[cfg(unix)]
 mod daemon;
 #[cfg(unix)]
@@ -37,6 +38,7 @@ use tokio::time::{sleep, Duration};
 
 use crate::services::Service;
 use configuration::{Opt, ServerConf};
+use connection_counter::ConnectionCounter;
 #[cfg(unix)]
 pub use transfer_fd::Fds;
 
@@ -48,6 +50,12 @@ const EXIT_TIMEOUT: u64 = 60 * 5;
 /* Time to wait before shutting down listening sockets.
 This is the graceful period for the new service to get ready */
 const CLOSE_TIMEOUT: u64 = 5;
+/* How often to report connection drain status during graceful shutdown */
+const DRAIN_REPORT_INTERVAL_SECS: u64 = 5;
+/* Polling interval for connection drain when long-lived connections exist */
+const DRAIN_POLL_INTERVAL_LONG_LIVED_MS: u64 = 500;
+/* Polling interval for connection drain when only short-lived connections exist */
+const DRAIN_POLL_INTERVAL_SHORT_LIVED_MS: u64 = 100;
 
 enum ShutdownType {
     Graceful,
@@ -193,6 +201,9 @@ pub struct Server {
     /// Users can subscribe to the phase with [`Self::watch_execution_phase()`].
     execution_phase_watch: broadcast::Sender<ExecutionPhase>,
 
+    /// Tracks active connections for proper graceful shutdown
+    connection_counter: Arc<ConnectionCounter>,
+
     /// The parsed server configuration
     pub configuration: Arc<ServerConf>,
     /// The parser command line options
@@ -213,6 +224,18 @@ impl Server {
     /// The receiver will produce values for each transition.
     pub fn watch_execution_phase(&self) -> broadcast::Receiver<ExecutionPhase> {
         self.execution_phase_watch.subscribe()
+    }
+
+    /// Get a reference to the connection counter for tracking active connections
+    ///
+    /// This is useful for monitoring and graceful shutdown implementations
+    pub fn connection_counter(&self) -> &Arc<ConnectionCounter> {
+        &self.connection_counter
+    }
+
+    /// Get the total number of active connections
+    pub fn active_connection_count(&self) -> usize {
+        self.connection_counter.active_count()
     }
 
     #[cfg(unix)]
@@ -361,6 +384,7 @@ impl Server {
             shutdown_watch: tx,
             shutdown_recv: rx,
             execution_phase_watch: broadcast::channel(100).0,
+            connection_counter: Arc::new(ConnectionCounter::new()),
             configuration: Arc::new(conf),
             options: opt,
             #[cfg(feature = "sentry")]
@@ -404,6 +428,7 @@ impl Server {
             shutdown_watch: tx,
             shutdown_recv: rx,
             execution_phase_watch: broadcast::channel(100).0,
+            connection_counter: Arc::new(ConnectionCounter::new()),
             configuration: Arc::new(conf),
             options: opt,
             #[cfg(feature = "sentry")]
@@ -552,8 +577,58 @@ impl Server {
                 .as_ref()
                 .grace_period_seconds
                 .unwrap_or(EXIT_TIMEOUT);
+            
             info!("Graceful shutdown: grace period {}s starts", exit_timeout);
-            thread::sleep(Duration::from_secs(exit_timeout));
+            
+            // Wait for connections to drain with intelligent monitoring
+            let drain_start = std::time::Instant::now();
+            let drain_timeout = Duration::from_secs(exit_timeout);
+            let mut last_report = drain_start;
+            
+            loop {
+                let active = self.connection_counter.active_count();
+                let websockets = self.connection_counter.websocket_count();
+                let streams = self.connection_counter.streaming_count();
+                
+                if active == 0 {
+                    info!("All connections drained gracefully");
+                    break;
+                }
+                
+                let elapsed = drain_start.elapsed();
+                if elapsed >= drain_timeout {
+                    warn!(
+                        "Drain timeout reached with {} connections still active ({} WebSocket, {} streaming)",
+                        active, websockets, streams
+                    );
+                    break;
+                }
+                
+                // Report status every 5 seconds
+                if last_report.elapsed() >= Duration::from_secs(DRAIN_REPORT_INTERVAL_SECS) {
+                    info!(
+                        "Draining connections: {} active ({} HTTP, {} WebSocket, {} streaming), {:.1}s remaining",
+                        active,
+                        self.connection_counter.http_count(),
+                        websockets,
+                        streams,
+                        drain_timeout.as_secs_f64() - elapsed.as_secs_f64()
+                    );
+                    last_report = std::time::Instant::now();
+                }
+                
+                // Check more frequently if we only have short-lived connections
+                let sleep_duration = if self.connection_counter.has_long_lived_connections() {
+                    Duration::from_millis(DRAIN_POLL_INTERVAL_LONG_LIVED_MS)
+                } else {
+                    Duration::from_millis(DRAIN_POLL_INTERVAL_SHORT_LIVED_MS)
+                };
+                
+                // Note: We're in sync context here after main_loop completes,
+                // so thread::sleep is appropriate (not blocking an async executor)
+                thread::sleep(sleep_duration);
+            }
+            
             info!("Graceful shutdown: grace period ends");
         }
 
