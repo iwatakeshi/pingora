@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
   - `env_logger` 0.9 → 0.11
   - `serde_yaml` 0.8 → 0.9 (removes yaml-rust dependency)
   - `daemonize` → `daemonize-me` 2.0 (maintained alternative)
+  - `prometheus` 0.13 → 0.14 (fixes protobuf CVE-2024-12682 vulnerability)
 - Reduced security warnings from 7 to 4 (removed all fixable unmaintained dependencies)
 
 ## [0.6.0](https://github.com/cloudflare/pingora/compare/0.5.0...0.6.0) - 2025-08-15
