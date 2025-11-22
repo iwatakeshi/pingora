@@ -20,6 +20,12 @@ All notable changes to this project will be documented in this file.
 ### 🔧 Maintenance
 
 - Updated `httparse` constraint from `=1.8.0` to `^1.8` for AWS SDK compatibility (allows httparse >= 1.8)
+- Updated dependencies to address security warnings:
+  - `clap` 3.2 → 4.5 (removes proc-macro-error dependency)
+  - `env_logger` 0.9 → 0.11
+  - `serde_yaml` 0.8 → 0.9 (removes yaml-rust dependency)
+  - `daemonize` → `daemonize-me` 2.0 (maintained alternative)
+- Reduced security warnings from 7 to 4 (removed all fixable unmaintained dependencies)
 
 ## [0.6.0](https://github.com/cloudflare/pingora/compare/0.5.0...0.6.0) - 2025-08-15
  

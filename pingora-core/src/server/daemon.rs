@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use daemonize::{Daemonize, Stdio};
+use daemonize_me::{Daemon, User, Group};
 use log::{debug, error};
 use std::ffi::CString;
 use std::fs::{self, OpenOptions};
@@ -58,11 +58,13 @@ unsafe fn gid_for_username(name: &CString) -> Option<libc::gid_t> {
 pub fn daemonize(conf: &ServerConf) {
     // TODO: customize working dir
 
-    let daemonize = Daemonize::new()
-        .umask(0o007) // allow same group to access files but not everyone else
-        .pid_file(&conf.pid_file);
+    move_old_pid(&conf.pid_file);
 
-    let daemonize = if let Some(error_log) = conf.error_log.as_ref() {
+    let mut daemon = Daemon::new()
+        .umask(0o007) // allow same group to access files but not everyone else
+        .pid_file(&conf.pid_file, Some(false)); // don't chown initially
+
+    if let Some(error_log) = conf.error_log.as_ref() {
         let err = OpenOptions::new()
             .append(true)
             .create(true)
@@ -73,43 +75,32 @@ pub fn daemonize(conf: &ServerConf) {
             .custom_flags(libc::O_NONBLOCK)
             .open(error_log)
             .unwrap();
-        daemonize.stderr(err)
-    } else {
-        daemonize.stdout(Stdio::keep()).stderr(Stdio::keep())
-    };
+        daemon = daemon.stderr(err);
+    }
 
-    let daemonize = match conf.user.as_ref() {
-        Some(user) => {
-            let user_cstr = CString::new(user.as_str()).unwrap();
+    if let Some(user) = conf.user.as_ref() {
+        let user_cstr = CString::new(user.as_str()).unwrap();
 
-            #[cfg(target_os = "macos")]
-            let group_id = unsafe { gid_for_username(&user_cstr).map(|gid| gid as i32) };
-            #[cfg(target_os = "freebsd")]
-            let group_id = unsafe { gid_for_username(&user_cstr).map(|gid| gid as u32) };
-            #[cfg(target_os = "linux")]
-            let group_id = unsafe { gid_for_username(&user_cstr) };
+        #[cfg(target_os = "macos")]
+        let group_id = unsafe { gid_for_username(&user_cstr).map(|gid| gid as i32) };
+        #[cfg(target_os = "freebsd")]
+        let group_id = unsafe { gid_for_username(&user_cstr).map(|gid| gid as u32) };
+        #[cfg(target_os = "linux")]
+        let group_id = unsafe { gid_for_username(&user_cstr) };
 
-            daemonize
-                .privileged_action(move || {
-                    if let Some(gid) = group_id {
-                        // Set the supplemental group privileges for the child process.
-                        unsafe {
-                            libc::initgroups(user_cstr.as_ptr() as *const libc::c_char, gid);
-                        }
-                    }
-                })
-                .user(user.as_str())
-                .chown_pid_file(true)
+        if let Some(gid) = group_id {
+            // Set the supplemental group privileges for the child process.
+            unsafe {
+                libc::initgroups(user_cstr.as_ptr() as *const libc::c_char, gid);
+            }
         }
-        None => daemonize,
-    };
 
-    let daemonize = match conf.group.as_ref() {
-        Some(group) => daemonize.group(group.as_str()),
-        None => daemonize,
-    };
+        daemon = daemon.user(User::try_from(user.as_str()).unwrap());
+    }
 
-    move_old_pid(&conf.pid_file);
+    if let Some(group) = conf.group.as_ref() {
+        daemon = daemon.group(Group::try_from(group.as_str()).unwrap());
+    }
 
-    daemonize.start().unwrap(); // hard crash when fail
+    daemon.start().unwrap(); // hard crash when fail
 }
